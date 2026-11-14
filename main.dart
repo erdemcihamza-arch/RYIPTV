@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:media_kit/media_kit.dart';
 
 import 'api.dart';
@@ -27,12 +28,30 @@ class IptvApp extends StatelessWidget {
       title: 'RYIPTV',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
+      locale: const Locale('tr', 'TR'),
+      supportedLocales: const [Locale('tr', 'TR')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       home: const Root(),
     );
   }
 }
 
 // ---------------------------------------------------------------- root
+
+Future<Library> fetchLibrary(Profile p) async {
+  if (!p.xtream) {
+    Session.api = null;
+    return loadM3u(p.m3u);
+  }
+  final api = XtreamApi(p.server, p.user, p.pass);
+  final lib = await api.loadAll();
+  Session.api = api;
+  return lib;
+}
 
 class Root extends StatefulWidget {
   const Root({super.key});
@@ -42,55 +61,63 @@ class Root extends StatefulWidget {
 
 class _RootState extends State<Root> {
   bool _loading = true;
+  bool _adding = false;
   String? _error;
   Library? _lib;
 
   @override
   void initState() {
     super.initState();
-    _autoLogin();
+    final p = Store.active;
+    if (p == null) {
+      _loading = false;
+    } else {
+      _switchTo(p);
+    }
   }
 
-  Future<void> _autoLogin() async {
-    final p = Store.prefs;
-    final type = p.getString('type');
-    if (type == null) {
-      setState(() => _loading = false);
-      return;
-    }
+  Future<void> _switchTo(Profile p) async {
+    setState(() {
+      _loading = true;
+      _adding = false;
+      _error = null;
+    });
     try {
-      Library lib;
-      if (type == 'm3u') {
-        Session.api = null;
-        lib = await loadM3u(p.getString('m3u') ?? '');
-      } else {
-        final api = XtreamApi(p.getString('server') ?? '',
-            p.getString('user') ?? '', p.getString('pass') ?? '');
-        lib = await api.loadAll();
-        Session.api = api;
-      }
+      await Store.selectProfile(p.id);
+      Store.lock();
+      final lib = await fetchLibrary(p);
+      if (!mounted) return;
       setState(() {
         _lib = lib;
         _loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
-        _error = e.toString().replaceFirst('Exception: ', '');
+        _lib = null;
         _loading = false;
+        _error = e.toString().replaceFirst('Exception: ', '');
       });
     }
   }
 
-  Future<void> _logout() async {
-    for (final k in ['type', 'm3u', 'server', 'user', 'pass']) {
-      await Store.prefs.remove(k);
-    }
-    Session.api = null;
+  Future<void> _removeActive() async {
+    final id = Store.activeId;
+    if (id == null) return;
+    await Store.removeProfile(id);
     Store.lock();
-    setState(() {
-      _lib = null;
-      _error = null;
-    });
+    final next = Store.active;
+    if (next == null) {
+      Session.api = null;
+      if (mounted) {
+        setState(() {
+          _lib = null;
+          _error = null;
+        });
+      }
+    } else {
+      await _switchTo(next);
+    }
   }
 
   @override
@@ -117,10 +144,25 @@ class _RootState extends State<Root> {
         ),
       );
     }
-    if (_lib != null) return Shell(lib: _lib!, onLogout: _logout);
+    if (_lib != null && !_adding) {
+      return Shell(
+        key: ValueKey(Store.activeId),
+        lib: _lib!,
+        onRemove: _removeActive,
+        onAdd: () => setState(() => _adding = true),
+        onSwitch: _switchTo,
+      );
+    }
     return LoginPage(
       initialError: _error,
-      onLoaded: (l) => setState(() => _lib = l),
+      canCancel: _lib != null,
+      onCancel: () => setState(() => _adding = false),
+      onSwitch: _switchTo,
+      onLoaded: (lib) => setState(() {
+        _lib = lib;
+        _adding = false;
+        _error = null;
+      }),
     );
   }
 }
@@ -137,8 +179,16 @@ class _Tab {
 
 class Shell extends StatefulWidget {
   final Library lib;
-  final VoidCallback onLogout;
-  const Shell({super.key, required this.lib, required this.onLogout});
+  final VoidCallback onRemove;
+  final VoidCallback onAdd;
+  final void Function(Profile) onSwitch;
+  const Shell({
+    super.key,
+    required this.lib,
+    required this.onRemove,
+    required this.onAdd,
+    required this.onSwitch,
+  });
 
   @override
   State<Shell> createState() => _ShellState();
@@ -160,8 +210,17 @@ class _ShellState extends State<Shell> {
       if (lib.series.isNotEmpty)
         _Tab('Diziler', Icons.video_library_outlined, Icons.video_library,
             VodPage(kind: Kind.series, items: lib.series)),
-      _Tab('Ayarlar', Icons.settings_outlined, Icons.settings,
-          SettingsPage(lib: lib, onLogout: widget.onLogout)),
+      _Tab(
+        'Ayarlar',
+        Icons.settings_outlined,
+        Icons.settings,
+        SettingsPage(
+          lib: lib,
+          onRemove: widget.onRemove,
+          onAdd: widget.onAdd,
+          onSwitch: widget.onSwitch,
+        ),
+      ),
     ];
     final idx = _i.clamp(0, tabs.length - 1);
     return Scaffold(
@@ -186,8 +245,18 @@ class _ShellState extends State<Shell> {
 
 class LoginPage extends StatefulWidget {
   final String? initialError;
+  final bool canCancel;
+  final VoidCallback onCancel;
+  final void Function(Profile) onSwitch;
   final void Function(Library) onLoaded;
-  const LoginPage({super.key, this.initialError, required this.onLoaded});
+  const LoginPage({
+    super.key,
+    this.initialError,
+    required this.canCancel,
+    required this.onCancel,
+    required this.onSwitch,
+    required this.onLoaded,
+  });
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -195,6 +264,7 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   bool _xtream = false;
+  final _name = TextEditingController();
   final _m3u = TextEditingController();
   final _server = TextEditingController();
   final _user = TextEditingController();
@@ -214,23 +284,22 @@ class _LoginPageState extends State<LoginPage> {
       _error = null;
     });
     try {
-      final p = Store.prefs;
-      Library lib;
-      if (!_xtream) {
-        lib = await loadM3u(_m3u.text);
-        Session.api = null;
-        await p.setString('type', 'm3u');
-        await p.setString('m3u', _m3u.text.trim());
-      } else {
-        final api = XtreamApi(_server.text, _user.text, _pass.text);
-        lib = await api.loadAll();
-        Session.api = api;
-        await p.setString('type', 'xtream');
-        await p.setString('server', _server.text.trim());
-        await p.setString('user', _user.text.trim());
-        await p.setString('pass', _pass.text.trim());
-      }
+      final name = _name.text.trim().isEmpty
+          ? 'Liste ${Store.profiles.length + 1}'
+          : _name.text.trim();
+      final profile = Profile(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        name: name,
+        xtream: _xtream,
+        m3u: _m3u.text.trim(),
+        server: _server.text.trim(),
+        user: _user.text.trim(),
+        pass: _pass.text.trim(),
+      );
+      final lib = await fetchLibrary(profile);
       if (lib.all.isEmpty) throw Exception('Hiç içerik bulunamadı');
+      await Store.addProfile(profile);
+      Store.lock();
       widget.onLoaded(lib);
     } catch (e) {
       setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
@@ -241,12 +310,23 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    final saved = widget.canCancel ? <Profile>[] : Store.profiles;
     return Scaffold(
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(24),
           children: [
-            const SizedBox(height: 32),
+            if (widget.canCancel)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: IconButton(
+                  tooltip: 'Vazgeç',
+                  icon: const Icon(Icons.close),
+                  onPressed: widget.onCancel,
+                ),
+              )
+            else
+              const SizedBox(height: 32),
             Center(
               child: ShaderMask(
                 shaderCallback: (r) => brandGradient.createShader(r),
@@ -259,11 +339,31 @@ class _LoginPageState extends State<LoginPage> {
               ),
             ),
             const SizedBox(height: 6),
-            const Center(
-              child: Text('Canlı TV, filmler ve diziler tek yerde',
-                  style: TextStyle(color: Colors.white54)),
+            Center(
+              child: Text(
+                  widget.canCancel
+                      ? 'Yeni liste ekle'
+                      : 'Canlı TV, filmler ve diziler tek yerde',
+                  style: const TextStyle(color: Colors.white54)),
             ),
-            const SizedBox(height: 36),
+            if (saved.isNotEmpty) ...[
+              const SizedBox(height: 24),
+              const Text('Kayıtlı listelerin',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              for (final p in saved)
+                Card(
+                  color: AppColors.card,
+                  child: ListTile(
+                    leading: const Icon(Icons.playlist_play),
+                    title: Text(p.name),
+                    subtitle: Text(p.xtream ? 'Xtream' : 'M3U linki'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => widget.onSwitch(p),
+                  ),
+                ),
+            ],
+            const SizedBox(height: 28),
             SegmentedButton<bool>(
               segments: const [
                 ButtonSegment(value: false, label: Text('M3U linki')),
@@ -273,6 +373,14 @@ class _LoginPageState extends State<LoginPage> {
               onSelectionChanged: (s) => setState(() => _xtream = s.first),
             ),
             const SizedBox(height: 20),
+            TextField(
+              controller: _name,
+              decoration: const InputDecoration(
+                labelText: 'Liste adı (isteğe bağlı)',
+                hintText: 'Ev, Yedek, Aile…',
+              ),
+            ),
+            const SizedBox(height: 12),
             if (!_xtream)
               TextField(
                 controller: _m3u,

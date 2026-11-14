@@ -65,6 +65,56 @@ class SeriesDetails {
   const SeriesDetails({this.plot, this.episodes = const {}});
 }
 
+class Profile {
+  final String id;
+  final String name;
+  final bool xtream;
+  final String m3u;
+  final String server;
+  final String user;
+  final String pass;
+
+  const Profile({
+    required this.id,
+    required this.name,
+    required this.xtream,
+    this.m3u = '',
+    this.server = '',
+    this.user = '',
+    this.pass = '',
+  });
+
+  Profile copyWith({String? name}) => Profile(
+        id: id,
+        name: name ?? this.name,
+        xtream: xtream,
+        m3u: m3u,
+        server: server,
+        user: user,
+        pass: pass,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'xtream': xtream,
+        'm3u': m3u,
+        'server': server,
+        'user': user,
+        'pass': pass,
+      };
+
+  factory Profile.fromJson(Map<String, dynamic> j) => Profile(
+        id: j['id'] as String,
+        name: j['name'] as String,
+        xtream: j['xtream'] as bool,
+        m3u: (j['m3u'] ?? '') as String,
+        server: (j['server'] ?? '') as String,
+        user: (j['user'] ?? '') as String,
+        pass: (j['pass'] ?? '') as String,
+      );
+}
+
 class Library {
   final List<Item> live;
   final List<Item> movies;

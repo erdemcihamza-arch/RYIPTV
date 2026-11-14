@@ -7,16 +7,68 @@ import 'theme.dart';
 
 class SettingsPage extends StatefulWidget {
   final Library lib;
-  final VoidCallback onLogout;
-  const SettingsPage({super.key, required this.lib, required this.onLogout});
+  final VoidCallback onRemove;
+  final VoidCallback onAdd;
+  final void Function(Profile) onSwitch;
+  const SettingsPage({
+    super.key,
+    required this.lib,
+    required this.onRemove,
+    required this.onAdd,
+    required this.onSwitch,
+  });
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  void _snack(String t) => ScaffoldMessenger.of(context)
-      .showSnackBar(SnackBar(content: Text(t)));
+  void _snack(String t) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t)));
+
+  Future<void> _rename(Profile p) async {
+    final c = TextEditingController(text: p.name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Liste adı'),
+        content: TextField(controller: c, autofocus: true),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Vazgeç')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, c.text.trim()),
+              child: const Text('Kaydet')),
+        ],
+      ),
+    );
+    if (name != null && name.isNotEmpty) {
+      await Store.renameProfile(p.id, name);
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _confirmRemove() async {
+    final p = Store.active;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Listeyi sil'),
+        content: Text(
+            '${p?.name ?? 'Bu liste'} silinsin mi? Bu listenin favorileri ve izleme geçmişi de silinir.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Vazgeç')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Sil')),
+        ],
+      ),
+    );
+    if (ok == true) widget.onRemove();
+  }
 
   Future<void> _setPin() async {
     if (Store.hasPin && !await verifyPin(context)) return;
@@ -64,11 +116,37 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final lockedCount =
-        widget.lib.groups().where(Store.isLockedGroup).length;
+    final lockedCount = widget.lib.groups().where(Store.isLockedGroup).length;
     return Scaffold(
       appBar: AppBar(title: const Text('Ayarlar')),
       body: ListView(children: [
+        _section('Listelerim'),
+        for (final p in Store.profiles)
+          ListTile(
+            leading: Icon(
+              p.id == Store.activeId
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_off,
+              color: p.id == Store.activeId ? AppColors.pink : null,
+            ),
+            title: Text(p.name),
+            subtitle: Text(
+              p.xtream ? 'Xtream · ${p.server}' : 'M3U linki',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: IconButton(
+              tooltip: 'Adı değiştir',
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: () => _rename(p),
+            ),
+            onTap: p.id == Store.activeId ? null : () => widget.onSwitch(p),
+          ),
+        ListTile(
+          leading: const Icon(Icons.add_circle_outline),
+          title: const Text('Yeni liste ekle'),
+          onTap: widget.onAdd,
+        ),
         _section('Ebeveyn kilidi'),
         ListTile(
           leading: const Icon(Icons.pin_outlined),
@@ -130,10 +208,10 @@ class _SettingsPageState extends State<SettingsPage> {
           },
         ),
         ListTile(
-          leading: const Icon(Icons.logout),
-          title: const Text('Çıkış yap'),
-          subtitle: const Text('Kayıtlı liste bilgisini siler'),
-          onTap: widget.onLogout,
+          leading: const Icon(Icons.delete_outline),
+          title: const Text('Bu listeyi sil'),
+          subtitle: const Text('Listenin favorileri ve geçmişi de silinir'),
+          onTap: _confirmRemove,
         ),
       ]),
     );
