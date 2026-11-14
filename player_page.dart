@@ -23,12 +23,21 @@ class PlayerPage extends StatefulWidget {
 
 class _PlayerPageState extends State<PlayerPage> {
   late final Player _player = Player();
-  late final VideoController _controller = VideoController(
-    _player,
-    configuration: VideoControllerConfiguration(
-      enableHardwareAcceleration: Store.hwAccel,
-    ),
-  );
+  late final VideoController _controller =
+      VideoController(_player, configuration: _config());
+
+  VideoControllerConfiguration _config() {
+    switch (Store.videoMode) {
+      case 1:
+        return const VideoControllerConfiguration(
+            enableHardwareAcceleration: false);
+      case 2:
+        return const VideoControllerConfiguration(
+            vo: 'mediacodec_embed', hwdec: 'mediacodec');
+      default:
+        return const VideoControllerConfiguration();
+    }
+  }
   late final List<String> _candidates;
   int _idx = 0;
   Timer? _watchdog;

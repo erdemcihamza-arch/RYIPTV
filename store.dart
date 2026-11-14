@@ -20,7 +20,7 @@ class Store {
   static List<Item> recents = [];
   static bool autoAdult = true;
   static bool lowLatency = true;
-  static bool hwAccel = true;
+  static int videoMode = 0; // 0 otomatik, 1 yazilim, 2 alternatif
 
   static List<Profile> profiles = [];
   static String? activeId;
@@ -34,7 +34,8 @@ class Store {
     lockedGroups.addAll(prefs.getStringList('locked') ?? []);
     autoAdult = prefs.getBool('autoAdult') ?? true;
     lowLatency = prefs.getBool('lowLatency') ?? true;
-    hwAccel = prefs.getBool('hwAccel') ?? true;
+    videoMode = prefs.getInt('videoMode') ?? 0;
+    if (videoMode < 0 || videoMode > 2) videoMode = 0;
     _pinHash = prefs.getString('pin');
     await _loadProfiles();
     _loadProfileData();
@@ -212,9 +213,9 @@ class Store {
     prefs.setStringList('locked', lockedGroups.toList());
   }
 
-  static Future<void> setHwAccel(bool v) async {
-    hwAccel = v;
-    await prefs.setBool('hwAccel', v);
+  static Future<void> setVideoMode(int v) async {
+    videoMode = v;
+    await prefs.setInt('videoMode', v);
   }
 
   static Future<void> setLowLatency(bool v) async {
