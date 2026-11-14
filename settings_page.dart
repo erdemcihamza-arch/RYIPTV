@@ -105,41 +105,6 @@ class _SettingsPageState extends State<SettingsPage> {
     if (mounted) setState(() {});
   }
 
-  static const _videoModes = [
-    'Otomatik',
-    'Uyumlu (yazılım çözücü)',
-    'Alternatif (doğrudan yüzey)',
-  ];
-
-  Future<void> _pickVideoMode() async {
-    final v = await showDialog<int>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('Görüntü modu'),
-        children: [
-          for (var i = 0; i < _videoModes.length; i++)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(ctx, i),
-              child: Row(children: [
-                Icon(
-                  i == Store.videoMode
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_off,
-                  size: 20,
-                ),
-                const SizedBox(width: 12),
-                Expanded(child: Text(_videoModes[i])),
-              ]),
-            ),
-        ],
-      ),
-    );
-    if (v != null) {
-      await Store.setVideoMode(v);
-      if (mounted) setState(() {});
-    }
-  }
-
   Widget _section(String t) => Padding(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 6),
         child: Text(t,
@@ -232,13 +197,6 @@ class _SettingsPageState extends State<SettingsPage> {
             await Store.setLowLatency(v);
             if (mounted) setState(() {});
           },
-        ),
-        ListTile(
-          leading: const Icon(Icons.tv_outlined),
-          title: const Text('Görüntü modu'),
-          subtitle: Text(
-              '${_videoModes[Store.videoMode]}. Görüntü ekranın üstünde ince kalıyorsa ya da siyahsa başka bir mod dene. Sonraki açılışta geçerli olur.'),
-          onTap: _pickVideoMode,
         ),
         _section('Hesap'),
         ListTile(

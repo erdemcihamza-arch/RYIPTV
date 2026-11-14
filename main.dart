@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:media_kit/media_kit.dart';
 
 import 'api.dart';
 import 'home_page.dart';
@@ -14,7 +13,6 @@ import 'widgets.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
   await Store.init();
   runApp(const IptvApp());
 }

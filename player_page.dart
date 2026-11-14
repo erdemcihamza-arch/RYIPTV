@@ -1,8 +1,6 @@
-import 'dart:async';
-
+import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
+import 'package:video_player/video_player.dart';
 
 import 'store.dart';
 
@@ -22,25 +20,12 @@ class PlayerPage extends StatefulWidget {
 }
 
 class _PlayerPageState extends State<PlayerPage> {
-  late final Player _player = Player();
-  late final VideoController _controller =
-      VideoController(_player, configuration: _config());
-
-  VideoControllerConfiguration _config() {
-    switch (Store.videoMode) {
-      case 1:
-        return const VideoControllerConfiguration(
-            enableHardwareAcceleration: false);
-      case 2:
-        return const VideoControllerConfiguration(
-            vo: 'mediacodec_embed', hwdec: 'mediacodec');
-      default:
-        return const VideoControllerConfiguration();
-    }
-  }
   late final List<String> _candidates;
   int _idx = 0;
-  Timer? _watchdog;
+  int _gen = 0;
+  VideoPlayerController? _vc;
+  ChewieController? _cc;
+  bool _loading = true;
   String? _error;
 
   @override
@@ -50,62 +35,86 @@ class _PlayerPageState extends State<PlayerPage> {
     final fast =
         widget.isLive && Store.lowLatency && u.toLowerCase().endsWith('.m3u8');
     // Once .ts (dusuk gecikme), olmazsa orijinal .m3u8
-    _candidates = fast
-        ? ['${u.substring(0, u.length - 5)}.ts', u]
-        : [u];
-    _setup();
+    _candidates = fast ? ['${u.substring(0, u.length - 5)}.ts', u] : [u];
+    _start();
   }
 
-  Future<void> _setup() async {
-    if (widget.isLive && Store.lowLatency) {
-      try {
-        final p = _player.platform as dynamic;
-        await p.setProperty('profile', 'low-latency');
-        await p.setProperty('cache', 'no');
-        await p.setProperty('demuxer-readahead-secs', '2');
-      } catch (_) {}
-    }
-    _player.stream.error.listen((e) => _fail(e));
-    _player.stream.playing.listen((p) {
-      if (p && mounted) {
-        _watchdog?.cancel();
-        if (_error != null) setState(() => _error = null);
-      }
+  Future<void> _release() async {
+    final cc = _cc;
+    final vc = _vc;
+    _cc = null;
+    _vc = null;
+    cc?.dispose();
+    try {
+      await vc?.dispose();
+    } catch (_) {}
+  }
+
+  Future<void> _start() async {
+    final gen = ++_gen;
+    await _release();
+    if (!mounted || gen != _gen) return;
+    setState(() {
+      _loading = true;
+      _error = null;
     });
-    _openCurrent();
-  }
 
-  void _openCurrent() {
-    _watchdog?.cancel();
-    _player.open(Media(
-      _candidates[_idx],
+    final vc = VideoPlayerController.networkUrl(
+      Uri.parse(_candidates[_idx]),
       httpHeaders: const {'User-Agent': 'VLC/3.0.20 LibVLC/3.0.20'},
-    ));
-    // Yayin 10 sn icinde baslamazsa bir sonraki adrese gec
-    if (_idx < _candidates.length - 1) {
-      _watchdog = Timer(const Duration(seconds: 10), () {
-        if (mounted && !_player.state.playing) _fail('timeout');
+    );
+    try {
+      await vc.initialize().timeout(const Duration(seconds: 20));
+      if (!mounted || gen != _gen) {
+        try {
+          await vc.dispose();
+        } catch (_) {}
+        return;
+      }
+      final cc = ChewieController(
+        videoPlayerController: vc,
+        autoPlay: true,
+        isLive: widget.isLive,
+        allowFullScreen: true,
+        showControlsOnInitialize: false,
+        errorBuilder: (context, message) => const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Yayın kesildi.\nGeri dönüp tekrar aç.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white70),
+            ),
+          ),
+        ),
+      );
+      setState(() {
+        _vc = vc;
+        _cc = cc;
+        _loading = false;
       });
-    }
-  }
-
-  void _fail(String reason) {
-    if (!mounted) return;
-    // Yayin zaten oynuyorsa veya mesaj zararsiz bir uyariysa hata sayma
-    if (_player.state.playing) return;
-    if (reason.contains('force-seekable')) return;
-    if (_idx < _candidates.length - 1) {
-      _idx++;
-      _openCurrent();
-    } else {
-      setState(() => _error = reason);
+    } catch (e) {
+      try {
+        await vc.dispose();
+      } catch (_) {}
+      if (!mounted || gen != _gen) return;
+      if (_idx < _candidates.length - 1) {
+        _idx++;
+        _start();
+      } else {
+        setState(() {
+          _loading = false;
+          _error = '$e';
+        });
+      }
     }
   }
 
   @override
   void dispose() {
-    _watchdog?.cancel();
-    _player.dispose();
+    _gen++;
+    _cc?.dispose();
+    _vc?.dispose();
     super.dispose();
   }
 
@@ -114,7 +123,9 @@ class _PlayerPageState extends State<PlayerPage> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(children: [
-        Positioned.fill(child: Video(controller: _controller)),
+        if (_cc != null)
+          Positioned.fill(child: Center(child: Chewie(controller: _cc!))),
+        if (_loading) const Center(child: CircularProgressIndicator()),
         if (_error != null)
           Center(
             child: Padding(
@@ -136,11 +147,8 @@ class _PlayerPageState extends State<PlayerPage> {
                 const SizedBox(height: 14),
                 OutlinedButton(
                   onPressed: () {
-                    setState(() {
-                      _error = null;
-                      _idx = 0;
-                    });
-                    _openCurrent();
+                    _idx = 0;
+                    _start();
                   },
                   child: const Text('Tekrar dene'),
                 ),
