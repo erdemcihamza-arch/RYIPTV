@@ -198,6 +198,17 @@ class _SettingsPageState extends State<SettingsPage> {
             if (mounted) setState(() {});
           },
         ),
+        SwitchListTile(
+          secondary: const Icon(Icons.memory_outlined),
+          title: const Text('Donanım hızlandırma'),
+          subtitle: const Text(
+              'Film veya dizide siyah ekran ya da bozuk görüntü olursa kapat. Sonraki açılışta geçerli olur.'),
+          value: Store.hwAccel,
+          onChanged: (v) async {
+            await Store.setHwAccel(v);
+            if (mounted) setState(() {});
+          },
+        ),
         _section('Hesap'),
         ListTile(
           leading: const Icon(Icons.history),

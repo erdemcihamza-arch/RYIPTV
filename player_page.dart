@@ -23,7 +23,12 @@ class PlayerPage extends StatefulWidget {
 
 class _PlayerPageState extends State<PlayerPage> {
   late final Player _player = Player();
-  late final VideoController _controller = VideoController(_player);
+  late final VideoController _controller = VideoController(
+    _player,
+    configuration: VideoControllerConfiguration(
+      enableHardwareAcceleration: Store.hwAccel,
+    ),
+  );
   late final List<String> _candidates;
   int _idx = 0;
   Timer? _watchdog;
@@ -52,6 +57,12 @@ class _PlayerPageState extends State<PlayerPage> {
       } catch (_) {}
     }
     _player.stream.error.listen((e) => _fail(e));
+    _player.stream.playing.listen((p) {
+      if (p && mounted) {
+        _watchdog?.cancel();
+        if (_error != null) setState(() => _error = null);
+      }
+    });
     _openCurrent();
   }
 
@@ -71,6 +82,9 @@ class _PlayerPageState extends State<PlayerPage> {
 
   void _fail(String reason) {
     if (!mounted) return;
+    // Yayin zaten oynuyorsa veya mesaj zararsiz bir uyariysa hata sayma
+    if (_player.state.playing) return;
+    if (reason.contains('force-seekable')) return;
     if (_idx < _candidates.length - 1) {
       _idx++;
       _openCurrent();

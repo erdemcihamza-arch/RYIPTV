@@ -20,6 +20,7 @@ class Store {
   static List<Item> recents = [];
   static bool autoAdult = true;
   static bool lowLatency = true;
+  static bool hwAccel = true;
 
   static List<Profile> profiles = [];
   static String? activeId;
@@ -33,6 +34,7 @@ class Store {
     lockedGroups.addAll(prefs.getStringList('locked') ?? []);
     autoAdult = prefs.getBool('autoAdult') ?? true;
     lowLatency = prefs.getBool('lowLatency') ?? true;
+    hwAccel = prefs.getBool('hwAccel') ?? true;
     _pinHash = prefs.getString('pin');
     await _loadProfiles();
     _loadProfileData();
@@ -208,6 +210,11 @@ class Store {
   static void toggleLockedGroup(String g) {
     if (!lockedGroups.remove(g)) lockedGroups.add(g);
     prefs.setStringList('locked', lockedGroups.toList());
+  }
+
+  static Future<void> setHwAccel(bool v) async {
+    hwAccel = v;
+    await prefs.setBool('hwAccel', v);
   }
 
   static Future<void> setLowLatency(bool v) async {
