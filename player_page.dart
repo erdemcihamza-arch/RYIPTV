@@ -98,15 +98,16 @@ class _PlayerPageState extends State<PlayerPage> {
       _player.stream.playing.listen((p) {
         if (!mounted) return;
         setState(() => _playing = p);
-        if (p && !_player.state.buffering) _markStarted();
       }),
       _player.stream.buffering.listen((b) {
         if (!mounted) return;
         setState(() => _buffering = b);
-        if (!b && _player.state.playing) _markStarted();
       }),
       _player.stream.position.listen((p) {
-        if (mounted && _drag == null && _show) setState(() => _pos = p);
+        if (!mounted) return;
+        // Yayin ancak sure gercekten ilerleyince "basladi" sayilir
+        if (p > Duration.zero) _markStarted();
+        if (_drag == null && _show) setState(() => _pos = p);
       }),
       _player.stream.duration.listen((d) {
         if (mounted) setState(() => _dur = d);
@@ -130,6 +131,13 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   Future<void> _setup() async {
+    // Bazi saglayicilar gecersiz / kendinden imzali https sertifikasi kullanir;
+    // diger uygulamalar gibi bunu kabul et
+    try {
+      final p = _player.platform as dynamic;
+      await p.setProperty('tls-verify', 'no');
+      await p.setProperty('network-timeout', '15');
+    } catch (_) {}
     if (widget.isLive && Store.lowLatency) {
       try {
         final p = _player.platform as dynamic;
