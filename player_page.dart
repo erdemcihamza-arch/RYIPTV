@@ -122,7 +122,9 @@ class _PlayerPageState extends State<PlayerPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Stack(children: [
+      // StackFit.expand: kapsayici her zaman tum ekrani kaplar. Ust cubuk
+      // Positioned oldugu icin video alanini kucultemez.
+      body: Stack(fit: StackFit.expand, children: [
         if (_cc != null)
           Positioned.fill(child: Center(child: Chewie(controller: _cc!))),
         if (_loading) const Center(child: CircularProgressIndicator()),
@@ -155,26 +157,31 @@ class _PlayerPageState extends State<PlayerPage> {
               ]),
             ),
           ),
-        SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: Row(children: [
-              IconButton.filledTonal(
-                style: IconButton.styleFrom(
-                    backgroundColor: const Color(0x88000000)),
-                icon: const Icon(Icons.arrow_back),
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(widget.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        shadows: [Shadow(blurRadius: 6)])),
-              ),
-            ]),
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Row(children: [
+                IconButton.filledTonal(
+                  style: IconButton.styleFrom(
+                      backgroundColor: const Color(0x88000000)),
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(widget.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          shadows: [Shadow(blurRadius: 6)])),
+                ),
+              ]),
+            ),
           ),
         ),
       ]),
