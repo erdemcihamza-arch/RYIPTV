@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:http/http.dart' as http;
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'store.dart';
@@ -47,6 +48,7 @@ class _PlayerPageState extends State<PlayerPage> {
   Duration _dur = Duration.zero;
   double? _drag;
   String? _error;
+  String? _probeInfo;
   String? _hint;
   bool _hintRight = true;
 
@@ -85,6 +87,7 @@ class _PlayerPageState extends State<PlayerPage> {
       'VLC/3.0.20 LibVLC/3.0.20',
       null,
       'IPTVSmartersPro',
+      'ExoPlayerLib/2.19.1',
     ];
     _candidates = [
       for (final ua in uas)
@@ -94,17 +97,13 @@ class _PlayerPageState extends State<PlayerPage> {
     _subs.addAll([
       _player.stream.playing.listen((p) {
         if (!mounted) return;
-        setState(() {
-          _playing = p;
-          if (p) {
-            _started = true;
-            _error = null;
-          }
-        });
-        if (p) _watchdog?.cancel();
+        setState(() => _playing = p);
+        if (p && !_player.state.buffering) _markStarted();
       }),
       _player.stream.buffering.listen((b) {
-        if (mounted) setState(() => _buffering = b);
+        if (!mounted) return;
+        setState(() => _buffering = b);
+        if (!b && _player.state.playing) _markStarted();
       }),
       _player.stream.position.listen((p) {
         if (mounted && _drag == null && _show) setState(() => _pos = p);
@@ -118,6 +117,16 @@ class _PlayerPageState extends State<PlayerPage> {
 
     _setup();
     _scheduleHide();
+  }
+
+  // Yayin gercekten akmaya basladi (veri geliyor)
+  void _markStarted() {
+    if (!mounted || _started) return;
+    _watchdog?.cancel();
+    setState(() {
+      _started = true;
+      _error = null;
+    });
   }
 
   Future<void> _setup() async {
@@ -140,24 +149,66 @@ class _PlayerPageState extends State<PlayerPage> {
       httpHeaders: ua == null ? null : {'User-Agent': ua},
     ));
     // Yayin 8 sn icinde baslamazsa bir sonraki varyanta gec
-    if (_idx < _candidates.length - 1) {
-      _watchdog = Timer(const Duration(seconds: 8), () {
-        if (mounted && !_player.state.playing) _fail('timeout');
-      });
-    }
+    final last = _idx >= _candidates.length - 1;
+    _watchdog = Timer(Duration(seconds: last ? 20 : 8), () {
+      if (mounted && !_started) _fail('timeout');
+    });
   }
 
   void _fail(String reason) {
     if (!mounted) return;
     // Yayin zaten oynuyorsa veya mesaj zararsiz bir uyariysa hata sayma
-    if (_player.state.playing) return;
+    if (_started) return;
     if (reason.contains('force-seekable')) return;
     if (_idx < _candidates.length - 1) {
       _idx++;
       _openCurrent();
     } else {
-      setState(() => _error = reason);
+      setState(() => _error = reason == 'timeout'
+          ? 'Sunucu veri göndermedi (zaman aşımı)'
+          : reason);
+      _runProbe();
     }
+  }
+
+  // ------------------------------------------------ baglanti testi
+
+  // Kullanici adi / sifre ekranda gorunmesin
+  String _mask(String s) => s
+      .replaceAllMapped(RegExp(r'/(live|movie|series)/[^/]+/[^/]+/'),
+          (m) => '/${m[1]}/***/***/')
+      .replaceAll(RegExp(r'(username|password)=[^&]*'), r'$1=***');
+
+  Future<String> _probeOne(String url, String? ua) async {
+    final c = http.Client();
+    try {
+      final req = http.Request('GET', Uri.parse(url));
+      if (ua != null) req.headers['User-Agent'] = ua;
+      final res = await c.send(req).timeout(const Duration(seconds: 10));
+      var got = 0;
+      try {
+        final first = await res.stream.first.timeout(const Duration(seconds: 8));
+        got = first.length;
+      } catch (_) {}
+      final ct = res.headers['content-type'] ?? '-';
+      final loc = res.headers['location'];
+      return 'HTTP ${res.statusCode} · $ct · ${got}B'
+          '${loc != null ? ' · yönlendirme: ${_mask(loc)}' : ''}';
+    } catch (e) {
+      final t = e.toString();
+      return 'Hata: ${t.length > 90 ? t.substring(0, 90) : t}';
+    } finally {
+      c.close();
+    }
+  }
+
+  Future<void> _runProbe() async {
+    setState(() => _probeInfo = 'Bağlantı test ediliyor…');
+    final a = await _probeOne(widget.url, 'VLC/3.0.20 LibVLC/3.0.20');
+    final b = await _probeOne(widget.url, null);
+    if (!mounted) return;
+    setState(() => _probeInfo =
+        '${_mask(widget.url)}\nVLC kimliği: $a\nKimliksiz: $b');
   }
 
   // ------------------------------------------------ ses / altyazi
@@ -319,7 +370,7 @@ class _PlayerPageState extends State<PlayerPage> {
   void _scheduleHide() {
     _hideTimer?.cancel();
     _hideTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted && _playing) setState(() => _show = false);
+      if (mounted && _started) setState(() => _show = false);
     });
   }
 
@@ -598,11 +649,21 @@ class _PlayerPageState extends State<PlayerPage> {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colors.white38, fontSize: 12),
                 ),
+                if (_probeInfo != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    _probeInfo!,
+                    textAlign: TextAlign.center,
+                    style:
+                        const TextStyle(color: Colors.white54, fontSize: 11),
+                  ),
+                ],
                 const SizedBox(height: 14),
                 OutlinedButton(
                   onPressed: () {
                     setState(() {
                       _error = null;
+                      _probeInfo = null;
                       _idx = 0;
                     });
                     _openCurrent();
