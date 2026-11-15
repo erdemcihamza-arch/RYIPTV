@@ -1,7 +1,7 @@
 name: iptv_app
 description: Kisisel IPTV oynatici (M3U + Xtream)
 publish_to: "none"
-version: 2.3.0+4
+version: 2.6.0+7
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -15,8 +15,9 @@ dependencies:
   shared_preferences: ^2.2.0
   crypto: ^3.0.3
   cached_network_image: ^3.3.1
-  video_player: ^2.8.0
-  chewie: ^1.7.5
+  media_kit: ^1.1.10
+  media_kit_video: ^1.2.4
+  media_kit_libs_video: ^1.0.4
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.1
