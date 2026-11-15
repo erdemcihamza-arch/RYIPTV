@@ -28,7 +28,7 @@ class _PlayerPageState extends State<PlayerPage> {
   late final Player _player = Player();
   late final VideoController _controller = VideoController(_player);
   final List<StreamSubscription> _subs = [];
-  late final List<String> _candidates;
+  late final List<(String, String?)> _candidates;
   late Tracks _tracks;
   int _idx = 0;
 
@@ -66,8 +66,30 @@ class _PlayerPageState extends State<PlayerPage> {
     final u = widget.url;
     final fast =
         widget.isLive && Store.lowLatency && u.toLowerCase().endsWith('.m3u8');
-    // Once .ts (dusuk gecikme), olmazsa orijinal .m3u8
-    _candidates = fast ? ['${u.substring(0, u.length - 5)}.ts', u] : [u];
+    // Adres cesitleri: canlida .ts ve .m3u8 ikisi de denenir
+    final low = u.toLowerCase();
+    final String? alt = !widget.isLive
+        ? null
+        : low.endsWith('.m3u8')
+            ? '${u.substring(0, u.length - 5)}.ts'
+            : (low.endsWith('.ts')
+                ? '${u.substring(0, u.length - 3)}.m3u8'
+                : null);
+    final urls = <String>[
+      if (fast && alt != null) alt,
+      u,
+      if (!fast && alt != null) alt,
+    ];
+    // Kimlik (User-Agent) cesitleri: bazi saglayicilar VLC'yi engeller
+    const uas = <String?>[
+      'VLC/3.0.20 LibVLC/3.0.20',
+      null,
+      'IPTVSmartersPro',
+    ];
+    _candidates = [
+      for (final ua in uas)
+        for (final x in urls) (x, ua),
+    ];
 
     _subs.addAll([
       _player.stream.playing.listen((p) {
@@ -112,13 +134,14 @@ class _PlayerPageState extends State<PlayerPage> {
 
   void _openCurrent() {
     _watchdog?.cancel();
+    final (url, ua) = _candidates[_idx];
     _player.open(Media(
-      _candidates[_idx],
-      httpHeaders: const {'User-Agent': 'VLC/3.0.20 LibVLC/3.0.20'},
+      url,
+      httpHeaders: ua == null ? null : {'User-Agent': ua},
     ));
-    // Yayin 10 sn icinde baslamazsa bir sonraki adrese gec
+    // Yayin 8 sn icinde baslamazsa bir sonraki varyanta gec
     if (_idx < _candidates.length - 1) {
-      _watchdog = Timer(const Duration(seconds: 10), () {
+      _watchdog = Timer(const Duration(seconds: 8), () {
         if (mounted && !_player.state.playing) _fail('timeout');
       });
     }
