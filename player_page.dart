@@ -30,7 +30,9 @@ class _PlayerPageState extends State<PlayerPage> {
   late final Player _player = Player();
   late final VideoController _controller = VideoController(_player);
   final List<StreamSubscription> _subs = [];
-  late final List<(String, String?, bool)> _candidates;
+  late List<(String, String?, bool)> _candidates;
+  List<String> _urls = const [];
+  final Map<String, String> _uaResults = {};
   String? _ip; // alan adinin IPv4 adresi (IPv6 takilmasina karsi)
   late Tracks _tracks;
   int _idx = 0;
@@ -91,19 +93,8 @@ class _PlayerPageState extends State<PlayerPage> {
         if (_fixed(x) != null) _fixed(x)!,
       ...base,
     ];
-    // Kimlik (User-Agent) cesitleri: bazi saglayicilar VLC'yi engeller
-    const uas = <String?>[
-      'VLC/3.0.20 LibVLC/3.0.20',
-      null,
-      'IPTVSmartersPro',
-      'ExoPlayerLib/2.19.1',
-    ];
-    // Once IPv4 adresiyle (varsa), sonra normal adresle farkli kimlikler
-    _candidates = [
-      for (final x in urls) (x, uas[0], true),
-      for (final ua in uas)
-        for (final x in urls) (x, ua, false),
-    ];
+    _urls = urls;
+    _candidates = _build(const [0, 1, 2, 3]);
 
     _subs.addAll([
       _player.stream.playing.listen((p) {
@@ -129,6 +120,65 @@ class _PlayerPageState extends State<PlayerPage> {
 
     _setup();
     _scheduleHide();
+  }
+
+  // Kimlik (User-Agent) cesitleri: bazi saglayicilar yalnizca bilinen
+  // uygulama kimliklerine cevap verir
+  static const _uaList = <String?>[
+    'VLC/3.0.20 LibVLC/3.0.20',
+    null,
+    'IPTVSmartersPro',
+    'ExoPlayerLib/2.19.1',
+    'okhttp/4.12.0',
+    'TiviMate/4.7.0',
+    'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) '
+        'Chrome/120.0.0.0 Mobile Safari/537.36',
+  ];
+
+  String _uaName(int i) {
+    final u = _uaList[i];
+    if (u == null) return 'Kimliksiz';
+    return u.length > 22 ? '${u.substring(0, 22)}…' : u;
+  }
+
+  // Once IPv4 adresiyle (varsa), sonra normal adresle sirayla kimlikler
+  List<(String, String?, bool)> _build(List<int> order) => [
+        for (final x in _urls) (x, _uaList[order.first], true),
+        for (final i in order)
+          for (final x in _urls) (x, _uaList[i], false),
+      ];
+
+  // Tum kimlikleri ayni anda dener; ilk cevap veren kimligin sirasini doner
+  Future<int> _raceUa() async {
+    if (_urls.isEmpty) return -1;
+    final target = _urls.first;
+    final done = Completer<int>();
+    var pending = _uaList.length;
+    for (var i = 0; i < _uaList.length; i++) {
+      () async {
+        final c = http.Client();
+        var res = '';
+        var ok = false;
+        try {
+          final req = http.Request('GET', Uri.parse(target));
+          final ua = _uaList[i];
+          if (ua != null) req.headers['User-Agent'] = ua;
+          final r = await c.send(req).timeout(const Duration(seconds: 7));
+          res = 'HTTP ${r.statusCode}';
+          ok = r.statusCode < 400;
+        } catch (e) {
+          res = e is TimeoutException ? 'cevap yok' : 'hata';
+        } finally {
+          c.close();
+        }
+        _uaResults[_uaName(i)] = res;
+        if (ok && !done.isCompleted) done.complete(i);
+        pending--;
+        if (pending == 0 && !done.isCompleted) done.complete(-1);
+      }();
+    }
+    return done.future
+        .timeout(const Duration(seconds: 9), onTimeout: () => -1);
   }
 
   String? _fixed(String u) {
@@ -175,7 +225,13 @@ class _PlayerPageState extends State<PlayerPage> {
       } catch (_) {}
     }
     await _resolveIp();
-    if (mounted) _openCurrent();
+    final best = await _raceUa();
+    if (!mounted) return;
+    if (best >= 0) {
+      _candidates = _build([best, ...[0, 1, 2, 3].where((i) => i != best)]);
+      _idx = 0;
+    }
+    _openCurrent();
   }
 
   Future<void> _resolveIp() async {
@@ -264,12 +320,9 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   Future<void> _runProbe() async {
-    setState(() => _probeInfo = 'Bağlantı test ediliyor…');
-    final a = await _probeOne(widget.url, 'VLC/3.0.20 LibVLC/3.0.20');
-    final b = await _probeOne(widget.url, null);
-    if (!mounted) return;
-    setState(() => _probeInfo =
-        '${_mask(widget.url)}\nVLC kimliği: $a\nKimliksiz: $b');
+    final table =
+        _uaResults.entries.map((e) => '${e.key}: ${e.value}').join('\n');
+    setState(() => _probeInfo = '${_mask(widget.url)}\n$table');
   }
 
   // ------------------------------------------------ ses / altyazi
