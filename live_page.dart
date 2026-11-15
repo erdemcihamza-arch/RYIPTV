@@ -17,6 +17,7 @@ class LivePage extends StatefulWidget {
 
 class _LivePageState extends State<LivePage> {
   String _q = '';
+  String _gq = '';
   String? _group;
   bool _favOnly = false;
 
@@ -31,6 +32,10 @@ class _LivePageState extends State<LivePage> {
   @override
   Widget build(BuildContext context) {
     final groups = widget.items.map((e) => e.group).toSet().toList()..sort();
+    final gq = _gq.toLowerCase();
+    final shownGroups = groups
+        .where((g) => g == _group || g.toLowerCase().contains(gq))
+        .toList();
     final q = _q.toLowerCase();
     final shown = widget.items.where((c) {
       if (!Store.visible(c)) return false;
@@ -54,7 +59,12 @@ class _LivePageState extends State<LivePage> {
       body: Column(children: [
         SearchField(
             hint: 'Kanal ara', onChanged: (v) => setState(() => _q = v)),
-        GroupChips(groups: groups, selected: _group, onSelect: _pickGroup),
+        SearchField(
+          hint: 'Kategori ara',
+          icon: Icons.category_outlined,
+          onChanged: (v) => setState(() => _gq = v),
+        ),
+        GroupChips(groups: shownGroups, selected: _group, onSelect: _pickGroup),
         Expanded(
           child: shown.isEmpty
               ? const EmptyState(icon: Icons.tv_off, text: 'Kanal bulunamadı')

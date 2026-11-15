@@ -17,7 +17,11 @@ class VodPage extends StatefulWidget {
 
 class _VodPageState extends State<VodPage> {
   String _q = '';
+  String _gq = '';
   String? _group;
+  int _sort = 0; // 0 yeni cikanlar, 1 yeni eklenenler, 2 A-Z
+
+  static const _sortNames = ['Yeni çıkanlar', 'Yeni eklenenler', 'A-Z'];
 
   Future<void> _pickGroup(String? g) async {
     if (g != null && Store.isLockedGroup(g)) {
@@ -27,25 +31,61 @@ class _VodPageState extends State<VodPage> {
     if (mounted) setState(() => _group = g);
   }
 
+  int _compare(Item a, Item b) {
+    switch (_sort) {
+      case 1:
+        final x = b.added.compareTo(a.added);
+        return x != 0 ? x : b.year.compareTo(a.year);
+      case 2:
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      default:
+        return newestFirst(a, b);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isMovie = widget.kind == Kind.movie;
     final groups = widget.items.map((e) => e.group).toSet().toList()..sort();
+    final gq = _gq.toLowerCase();
+    final shownGroups = groups
+        .where((g) => g == _group || g.toLowerCase().contains(gq))
+        .toList();
     final q = _q.toLowerCase();
     final shown = widget.items.where((c) {
       if (!Store.visible(c)) return false;
       if (_group != null && c.group != _group) return false;
       return q.isEmpty || c.name.toLowerCase().contains(q);
-    }).toList();
+    }).toList()
+      ..sort(_compare);
 
     return Scaffold(
-      appBar: AppBar(title: Text(isMovie ? 'Filmler' : 'Diziler')),
+      appBar: AppBar(
+        title: Text(isMovie ? 'Filmler' : 'Diziler'),
+        actions: [
+          PopupMenuButton<int>(
+            tooltip: 'Sırala',
+            icon: const Icon(Icons.sort),
+            initialValue: _sort,
+            onSelected: (v) => setState(() => _sort = v),
+            itemBuilder: (_) => [
+              for (var i = 0; i < _sortNames.length; i++)
+                PopupMenuItem(value: i, child: Text(_sortNames[i])),
+            ],
+          ),
+        ],
+      ),
       body: Column(children: [
         SearchField(
           hint: isMovie ? 'Film ara' : 'Dizi ara',
           onChanged: (v) => setState(() => _q = v),
         ),
-        GroupChips(groups: groups, selected: _group, onSelect: _pickGroup),
+        SearchField(
+          hint: 'Kategori ara',
+          icon: Icons.category_outlined,
+          onChanged: (v) => setState(() => _gq = v),
+        ),
+        GroupChips(groups: shownGroups, selected: _group, onSelect: _pickGroup),
         Expanded(
           child: shown.isEmpty
               ? EmptyState(

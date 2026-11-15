@@ -1,5 +1,22 @@
 enum Kind { live, movie, series }
 
+final Map<String, int> _yearCache = {};
+final RegExp _yearParen = RegExp(r'\(((?:19|20)\d{2})\)');
+final RegExp _yearTail = RegExp(r'((?:19|20)\d{2})\s*$');
+
+/// Ad icinden yayin yilini bulur: "Film (2016)" veya "Film 2016". Yoksa 0.
+int yearOfName(String name) => _yearCache.putIfAbsent(name, () {
+      final m = _yearParen.firstMatch(name) ?? _yearTail.firstMatch(name);
+      return m == null ? 0 : int.parse(m.group(1)!);
+    });
+
+/// Once yayin yili, sonra eklenme zamani; en yeni en uste.
+int newestFirst(Item a, Item b) {
+  final y = b.year.compareTo(a.year);
+  if (y != 0) return y;
+  return b.added.compareTo(a.added);
+}
+
 class Item {
   final String id;
   final String name;
@@ -9,6 +26,9 @@ class Item {
   final Kind kind;
   final String? rating;
   final String? ref; // Xtream stream_id veya series_id
+  final int added; // eklenme zamani (unix saniye), bilinmiyorsa 0
+
+  int get year => yearOfName(name);
 
   const Item({
     required this.id,
@@ -19,6 +39,7 @@ class Item {
     this.logo,
     this.rating,
     this.ref,
+    this.added = 0,
   });
 
   Map<String, dynamic> toJson() => {
@@ -30,6 +51,7 @@ class Item {
         'kind': kind.index,
         'rating': rating,
         'ref': ref,
+        'added': added,
       };
 
   factory Item.fromJson(Map<String, dynamic> j) => Item(
@@ -41,6 +63,7 @@ class Item {
         kind: Kind.values[j['kind'] as int],
         rating: j['rating'] as String?,
         ref: j['ref'] as String?,
+        added: (j['added'] ?? 0) as int,
       );
 }
 

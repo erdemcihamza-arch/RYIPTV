@@ -191,8 +191,14 @@ class GroupChips extends StatelessWidget {
 
 class SearchField extends StatelessWidget {
   final String hint;
+  final IconData icon;
   final ValueChanged<String> onChanged;
-  const SearchField({super.key, required this.hint, required this.onChanged});
+  const SearchField({
+    super.key,
+    required this.hint,
+    required this.onChanged,
+    this.icon = Icons.search,
+  });
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -200,7 +206,7 @@ class SearchField extends StatelessWidget {
         child: TextField(
           onChanged: onChanged,
           decoration: InputDecoration(
-            prefixIcon: const Icon(Icons.search),
+            prefixIcon: Icon(icon),
             hintText: hint,
             isDense: true,
           ),

@@ -67,9 +67,9 @@ class _HomePageState extends State<HomePage> {
           if (favs.isNotEmpty)
             PosterRow(title: 'Listem', items: favs, onTap: _open),
           if (movies.isNotEmpty)
-            PosterRow(title: 'Filmler', items: movies, onTap: _open),
+            PosterRow(title: 'Yeni filmler', items: movies, onTap: _open),
           if (series.isNotEmpty)
-            PosterRow(title: 'Diziler', items: series, onTap: _open),
+            PosterRow(title: 'Yeni diziler', items: series, onTap: _open),
           if (live.isNotEmpty) ...[
             const SectionTitle('Canlı yayınlar'),
             SizedBox(

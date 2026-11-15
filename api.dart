@@ -63,6 +63,8 @@ Library parseM3u(String text) {
       name = group = logo = null;
     }
   }
+  movies.sort(newestFirst);
+  series.sort(newestFirst);
   return Library(live: live, movies: movies, series: series);
 }
 
@@ -150,6 +152,7 @@ class XtreamApi {
         kind: Kind.movie,
         rating: _rating(s['rating']),
         ref: '${s['stream_id']}',
+        added: int.tryParse('${s['added'] ?? ''}') ?? 0,
       );
     }).toList();
   }
@@ -168,6 +171,7 @@ class XtreamApi {
         kind: Kind.series,
         rating: _rating(s['rating']),
         ref: '${s['series_id']}',
+        added: int.tryParse('${s['last_modified'] ?? ''}') ?? 0,
       );
     }).toList();
   }
@@ -182,6 +186,8 @@ class XtreamApi {
     try {
       series = await _series();
     } catch (_) {}
+    movies.sort(newestFirst);
+    series.sort(newestFirst);
     return Library(live: live, movies: movies, series: series);
   }
 

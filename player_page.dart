@@ -1,5 +1,6 @@
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import 'store.dart';
@@ -20,6 +21,8 @@ class PlayerPage extends StatefulWidget {
 }
 
 class _PlayerPageState extends State<PlayerPage> {
+  static const _pip = MethodChannel('ryiptv/pip');
+  bool _inPip = false;
   late final List<String> _candidates;
   int _idx = 0;
   int _gen = 0;
@@ -31,6 +34,13 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   void initState() {
     super.initState();
+    // Resim icinde resim: ana ekrana cikinca video kucuk pencerede devam eder
+    _pip.setMethodCallHandler((call) async {
+      if (call.method == 'pip' && mounted) {
+        setState(() => _inPip = call.arguments == true);
+      }
+    });
+    _pip.invokeMethod<void>('setEnabled', true).catchError((_) {});
     final u = widget.url;
     final fast =
         widget.isLive && Store.lowLatency && u.toLowerCase().endsWith('.m3u8');
@@ -113,6 +123,8 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   void dispose() {
     _gen++;
+    _pip.invokeMethod<void>('setEnabled', false).catchError((_) {});
+    _pip.setMethodCallHandler(null);
     _cc?.dispose();
     _vc?.dispose();
     super.dispose();
@@ -157,6 +169,7 @@ class _PlayerPageState extends State<PlayerPage> {
               ]),
             ),
           ),
+        if (!_inPip)
         Positioned(
           top: 0,
           left: 0,
@@ -179,6 +192,14 @@ class _PlayerPageState extends State<PlayerPage> {
                       style: const TextStyle(
                           fontWeight: FontWeight.w700,
                           shadows: [Shadow(blurRadius: 6)])),
+                ),
+                IconButton.filledTonal(
+                  tooltip: 'Küçük pencere',
+                  style: IconButton.styleFrom(
+                      backgroundColor: const Color(0x88000000)),
+                  icon: const Icon(Icons.picture_in_picture_alt),
+                  onPressed: () =>
+                      _pip.invokeMethod<void>('enter').catchError((_) {}),
                 ),
               ]),
             ),
