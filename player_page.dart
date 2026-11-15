@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -322,7 +323,52 @@ class _PlayerPageState extends State<PlayerPage> {
   Future<void> _runProbe() async {
     final table =
         _uaResults.entries.map((e) => '${e.key}: ${e.value}').join('\n');
-    setState(() => _probeInfo = '${_mask(widget.url)}\n$table');
+    final head = '${_mask(widget.url)}\n$table';
+    setState(() => _probeInfo = '$head\nHesap kontrol ediliyor…');
+
+    // Hesap durumu: gecerlilik, es zamanli baglanti sayisi, sunucu bilgisi
+    final uri = Uri.parse(widget.url);
+    final auths = <String>{'${uri.scheme}://${uri.host}:${uri.port}'};
+    final p = Store.active;
+    if (p != null) {
+      try {
+        final s = p.xtream ? p.server.trim() : p.m3u;
+        final b = Uri.parse(s.startsWith('http') ? s : 'http://$s');
+        if (b.host.isNotEmpty) auths.add('${b.scheme}://${b.host}:${b.port}');
+      } catch (_) {}
+    }
+    final acc = await Future.wait(auths.map(_accountInfo));
+    if (!mounted) return;
+    setState(() => _probeInfo = '$head\n${acc.where((e) => e.isNotEmpty).join('\n')}');
+  }
+
+  Future<String> _accountInfo(String auth) async {
+    try {
+      final m = RegExp(r'^/(live|movie|series)/([^/]+)/([^/]+)/')
+          .firstMatch(Uri.parse(widget.url).path);
+      if (m == null) return '';
+      final api = Uri.parse('$auth/player_api.php')
+          .replace(queryParameters: {'username': m[2]!, 'password': m[3]!});
+      final r = await http.get(api).timeout(const Duration(seconds: 8));
+      final j = jsonDecode(utf8.decode(r.bodyBytes, allowMalformed: true));
+      final ui = j['user_info'];
+      final si = j['server_info'];
+      if (ui == null) {
+        return '$auth → hesap bilgisi yok (HTTP ${r.statusCode})';
+      }
+      var exp = 'süresiz';
+      final e = int.tryParse('${ui['exp_date']}');
+      if (e != null) {
+        final d = DateTime.fromMillisecondsSinceEpoch(e * 1000);
+        exp = '${d.year}-${d.month.toString().padLeft(2, '0')}-'
+            '${d.day.toString().padLeft(2, '0')}';
+      }
+      return '$auth → ${ui['status']} · bağlantı '
+          '${ui['active_cons']}/${ui['max_connections']} · bitiş $exp'
+          '${si != null ? '\n   sunucu: ${si['server_protocol']}://${si['url']}:${si['port']}' : ''}';
+    } catch (e) {
+      return '$auth → ulaşılamadı';
+    }
   }
 
   // ------------------------------------------------ ses / altyazi
