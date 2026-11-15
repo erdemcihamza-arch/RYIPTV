@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -29,7 +30,8 @@ class _PlayerPageState extends State<PlayerPage> {
   late final Player _player = Player();
   late final VideoController _controller = VideoController(_player);
   final List<StreamSubscription> _subs = [];
-  late final List<(String, String?)> _candidates;
+  late final List<(String, String?, bool)> _candidates;
+  String? _ip; // alan adinin IPv4 adresi (IPv6 takilmasina karsi)
   late Tracks _tracks;
   int _idx = 0;
 
@@ -77,10 +79,17 @@ class _PlayerPageState extends State<PlayerPage> {
             : (low.endsWith('.ts')
                 ? '${u.substring(0, u.length - 3)}.m3u8'
                 : null);
-    final urls = <String>[
+    final base = <String>[
       if (fast && alt != null) alt,
       u,
       if (!fast && alt != null) alt,
+    ];
+    // M3U listesi: yayin adresindeki sunucu / port, liste linkinden farkliysa
+    // (ornegin :2086 yerine :8080) once liste linkinin sunucusunu dene
+    final urls = <String>[
+      for (final x in base)
+        if (_fixed(x) != null) _fixed(x)!,
+      ...base,
     ];
     // Kimlik (User-Agent) cesitleri: bazi saglayicilar VLC'yi engeller
     const uas = <String?>[
@@ -89,9 +98,11 @@ class _PlayerPageState extends State<PlayerPage> {
       'IPTVSmartersPro',
       'ExoPlayerLib/2.19.1',
     ];
+    // Once IPv4 adresiyle (varsa), sonra normal adresle farkli kimlikler
     _candidates = [
+      for (final x in urls) (x, uas[0], true),
       for (final ua in uas)
-        for (final x in urls) (x, ua),
+        for (final x in urls) (x, ua, false),
     ];
 
     _subs.addAll([
@@ -120,6 +131,23 @@ class _PlayerPageState extends State<PlayerPage> {
     _scheduleHide();
   }
 
+  String? _fixed(String u) {
+    final p = Store.active;
+    if (p == null || p.xtream || p.m3u.isEmpty) return null;
+    try {
+      final a = Uri.parse(u);
+      final b = Uri.parse(p.m3u);
+      if (!b.hasAuthority || b.host.isEmpty) return null;
+      if (a.host == b.host && a.port == b.port) return null;
+      if (!RegExp(r'^/(live|movie|series)/').hasMatch(a.path)) return null;
+      return a
+          .replace(scheme: b.scheme, host: b.host, port: b.port)
+          .toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
   // Yayin gercekten akmaya basladi (veri geliyor)
   void _markStarted() {
     if (!mounted || _started) return;
@@ -146,16 +174,41 @@ class _PlayerPageState extends State<PlayerPage> {
         await p.setProperty('demuxer-readahead-secs', '2');
       } catch (_) {}
     }
-    _openCurrent();
+    await _resolveIp();
+    if (mounted) _openCurrent();
+  }
+
+  Future<void> _resolveIp() async {
+    try {
+      final uri = Uri.parse(widget.url);
+      if (uri.scheme != 'http') return;
+      if (InternetAddress.tryParse(uri.host) != null) return;
+      final r = await InternetAddress.lookup(uri.host,
+              type: InternetAddressType.IPv4)
+          .timeout(const Duration(seconds: 5));
+      if (r.isNotEmpty) _ip = r.first.address;
+    } catch (_) {}
   }
 
   void _openCurrent() {
     _watchdog?.cancel();
-    final (url, ua) = _candidates[_idx];
-    _player.open(Media(
-      url,
-      httpHeaders: ua == null ? null : {'User-Agent': ua},
-    ));
+    var (url, ua, viaIp) = _candidates[_idx];
+    final headers = <String, String>{if (ua != null) 'User-Agent': ua};
+    if (viaIp) {
+      if (_ip == null) {
+        // IPv4 cozulemediyse bu varyanti atla
+        if (_idx < _candidates.length - 1) {
+          _idx++;
+          _openCurrent();
+          return;
+        }
+      } else {
+        final uri = Uri.parse(url);
+        headers['Host'] = uri.hasPort ? '${uri.host}:${uri.port}' : uri.host;
+        url = uri.replace(host: _ip).toString();
+      }
+    }
+    _player.open(Media(url, httpHeaders: headers));
     // Yayin 8 sn icinde baslamazsa bir sonraki varyanta gec
     final last = _idx >= _candidates.length - 1;
     _watchdog = Timer(Duration(seconds: last ? 20 : 8), () {
