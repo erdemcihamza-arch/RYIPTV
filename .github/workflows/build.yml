@@ -39,7 +39,70 @@ jobs:
           sed -i 's#<application#<application android:usesCleartextTraffic="true"#' $M
           sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' $M
           sed -i '0,/<activity/s#<activity#<meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false"/>\n        <activity#' $M
-          grep -n "EnableImpeller\|usesCleartextTraffic\|INTERNET" $M
+          sed -i 's#<activity#<activity android:supportsPictureInPicture="true"#' $M
+          grep -n "supportsPictureInPicture\|usesCleartextTraffic\|INTERNET" $M
+
+      - name: MainActivity (resim icinde resim)
+        run: |
+          F=$(find android/app/src/main -name 'MainActivity.*' | head -1)
+          PKG=$(grep -m1 '^package ' "$F" | sed 's/package //')
+          rm -f "$F"
+          D=android/app/src/main/kotlin/$(echo "$PKG" | tr . /)
+          mkdir -p "$D"
+          cat > "$D/MainActivity.kt" <<EOF
+          package $PKG
+
+          import android.app.PictureInPictureParams
+          import android.content.res.Configuration
+          import android.os.Build
+          import android.util.Rational
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+
+          class MainActivity : FlutterActivity() {
+              private var pipEnabled = false
+              private var channel: MethodChannel? = null
+
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+                  val ch = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ryiptv/pip")
+                  channel = ch
+                  ch.setMethodCallHandler { call, result ->
+                      when (call.method) {
+                          "setEnabled" -> {
+                              pipEnabled = (call.arguments as? Boolean) ?: false
+                              result.success(null)
+                          }
+                          "enter" -> {
+                              enterPip()
+                              result.success(null)
+                          }
+                          else -> result.notImplemented()
+                      }
+                  }
+              }
+
+              private fun enterPip() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val params = PictureInPictureParams.Builder()
+                          .setAspectRatio(Rational(16, 9))
+                          .build()
+                      enterPictureInPictureMode(params)
+                  }
+              }
+
+              override fun onUserLeaveHint() {
+                  super.onUserLeaveHint()
+                  if (pipEnabled) enterPip()
+              }
+
+              override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+                  super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+                  channel?.invokeMethod("pip", isInPictureInPictureMode)
+              }
+          }
+          EOF
 
       - run: flutter pub get
 
