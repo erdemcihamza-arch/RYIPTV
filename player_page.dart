@@ -35,6 +35,7 @@ class _PlayerPageState extends State<PlayerPage> {
   List<String> _urls = const [];
   final Map<String, String> _uaResults = {};
   final List<String> _logs = [];
+  String? _limitMsg;
   String? _ip; // alan adinin IPv4 adresi (IPv6 takilmasina karsi)
   late Tracks _tracks;
   int _idx = 0;
@@ -241,12 +242,9 @@ class _PlayerPageState extends State<PlayerPage> {
       } catch (_) {}
     }
     await _resolveIp();
-    final best = await _raceUa();
+    // Not: kimlikleri ayni anda denemiyoruz; tek baglantili hesaplarda
+    // fazladan baglanti yer kaplar
     if (!mounted) return;
-    if (best >= 0) {
-      _candidates = _build([best, ...[0, 1, 2, 3].where((i) => i != best)]);
-      _idx = 0;
-    }
     _openCurrent();
   }
 
@@ -359,11 +357,6 @@ class _PlayerPageState extends State<PlayerPage> {
     if (!mounted) return;
     final accText = acc.where((e) => e.isNotEmpty).join('\n');
     setState(() => _probeInfo = '$head\n$accText');
-    if (widget.isLive) {
-      final live = await _liveInfo();
-      if (!mounted) return;
-      setState(() => _probeInfo = '$head\n$accText\n$live');
-    }
   }
 
   // Canli yayin: adres ne donuyor, liste ise ilk parca hangi sunucuda
@@ -429,6 +422,13 @@ class _PlayerPageState extends State<PlayerPage> {
       final si = j['server_info'];
       if (ui == null) {
         return '$auth → hesap bilgisi yok (HTTP ${r.statusCode})';
+      }
+      final act = int.tryParse('${ui['active_cons']}');
+      final mx = int.tryParse('${ui['max_connections']}');
+      if (act != null && mx != null && mx > 0 && act >= mx) {
+        _limitMsg = 'Bu kod şu an başka bir cihazda ya da uygulamada açık '
+            'görünüyor (bağlantı $act/$mx). Diğerini kapat, 1-2 dakika bekle, '
+            'sonra "Tekrar dene"ye bas.';
       }
       var exp = 'süresiz';
       final e = int.tryParse('${ui['exp_date']}');
@@ -877,12 +877,23 @@ class _PlayerPageState extends State<PlayerPage> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  _error!,
+                  _mask(_error!),
                   textAlign: TextAlign.center,
                   maxLines: 4,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colors.white38, fontSize: 12),
                 ),
+                if (_limitMsg != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    _limitMsg!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        color: Colors.amberAccent,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700),
+                  ),
+                ],
                 if (_probeInfo != null) ...[
                   const SizedBox(height: 10),
                   Text(
@@ -898,6 +909,7 @@ class _PlayerPageState extends State<PlayerPage> {
                     setState(() {
                       _error = null;
                       _probeInfo = null;
+                      _limitMsg = null;
                       _idx = 0;
                     });
                     _openCurrent();
