@@ -34,6 +34,7 @@ class _PlayerPageState extends State<PlayerPage> {
   late List<(String, String?, bool)> _candidates;
   List<String> _urls = const [];
   final Map<String, String> _uaResults = {};
+  final List<String> _logs = [];
   String? _ip; // alan adinin IPv4 adresi (IPv6 takilmasina karsi)
   late Tracks _tracks;
   int _idx = 0;
@@ -118,6 +119,20 @@ class _PlayerPageState extends State<PlayerPage> {
       _player.stream.tracks.listen(_onTracks),
       _player.stream.error.listen(_fail),
     ]);
+
+    // Oynatıcının kendi hata mesajlarını topla (hata ekraninda gosterilir)
+    try {
+      final s = (_player.stream as dynamic).log as Stream<dynamic>;
+      _subs.add(s.listen((l) {
+        try {
+          final t = '${l.text}'.trim();
+          if (t.isNotEmpty) {
+            _logs.add(t.length > 120 ? t.substring(0, 120) : t);
+            if (_logs.length > 8) _logs.removeAt(0);
+          }
+        } catch (_) {}
+      }));
+    } catch (_) {}
 
     _setup();
     _scheduleHide();
@@ -284,7 +299,7 @@ class _PlayerPageState extends State<PlayerPage> {
     } else {
       setState(() => _error = reason == 'timeout'
           ? 'Sunucu veri göndermedi (zaman aşımı)'
-          : reason);
+          : (reason.trim().isEmpty ? 'Yayın verisi alınamadı' : reason));
       _runProbe();
     }
   }
@@ -323,7 +338,10 @@ class _PlayerPageState extends State<PlayerPage> {
   Future<void> _runProbe() async {
     final table =
         _uaResults.entries.map((e) => '${e.key}: ${e.value}').join('\n');
-    final head = '${_mask(widget.url)}\n$table';
+    final mpv = _logs.isEmpty
+        ? ''
+        : '\noynatıcı: ${_logs.reversed.take(4).map(_mask).join(' | ')}';
+    final head = '${_mask(widget.url)}\n$table$mpv';
     setState(() => _probeInfo = '$head\nHesap kontrol ediliyor…');
 
     // Hesap durumu: gecerlilik, es zamanli baglanti sayisi, sunucu bilgisi
@@ -339,7 +357,63 @@ class _PlayerPageState extends State<PlayerPage> {
     }
     final acc = await Future.wait(auths.map(_accountInfo));
     if (!mounted) return;
-    setState(() => _probeInfo = '$head\n${acc.where((e) => e.isNotEmpty).join('\n')}');
+    final accText = acc.where((e) => e.isNotEmpty).join('\n');
+    setState(() => _probeInfo = '$head\n$accText');
+    if (widget.isLive) {
+      final live = await _liveInfo();
+      if (!mounted) return;
+      setState(() => _probeInfo = '$head\n$accText\n$live');
+    }
+  }
+
+  // Canli yayin: adres ne donuyor, liste ise ilk parca hangi sunucuda
+  Future<String> _liveInfo() async {
+    const ua = 'VLC/3.0.20 LibVLC/3.0.20';
+    final c = http.Client();
+    try {
+      final u = Uri.parse(widget.url);
+      final r = await c
+          .send(http.Request('GET', u)..headers['User-Agent'] = ua)
+          .timeout(const Duration(seconds: 8));
+      final ct = r.headers['content-type'] ?? '-';
+      final loc = r.headers['location'];
+      List<int> first = [];
+      try {
+        first = await r.stream.first.timeout(const Duration(seconds: 6));
+      } catch (_) {}
+      final text = utf8.decode(first.take(1500).toList(), allowMalformed: true);
+      final lines = text
+          .split('\n')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+      final b = StringBuffer('Yayın: HTTP ${r.statusCode} · $ct · ${first.length}B');
+      if (loc != null) b.write('\nyönlendirme: ${_mask(loc)}');
+      if (text.startsWith('#EXTM3U')) {
+        b.write('\nliste: ${lines.take(5).map(_mask).join(' | ')}');
+        final seg = lines.firstWhere((e) => !e.startsWith('#'), orElse: () => '');
+        if (seg.isNotEmpty) {
+          final su = u.resolve(seg);
+          b.write('\nparça sunucusu: ${su.host}:${su.port}');
+          final c2 = http.Client();
+          try {
+            final rr = await c2
+                .send(http.Request('GET', su)..headers['User-Agent'] = ua)
+                .timeout(const Duration(seconds: 6));
+            b.write(' → HTTP ${rr.statusCode}');
+          } catch (e) {
+            b.write(' → ${e is TimeoutException ? 'cevap yok' : 'hata'}');
+          } finally {
+            c2.close();
+          }
+        }
+      }
+      return b.toString();
+    } catch (e) {
+      return 'Yayın testi: ${e is TimeoutException ? 'cevap yok' : 'hata'}';
+    } finally {
+      c.close();
+    }
   }
 
   Future<String> _accountInfo(String auth) async {
