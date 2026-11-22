@@ -39,6 +39,7 @@ class _PlayerPageState extends State<PlayerPage> {
   String? _ip; // alan adinin IPv4 adresi (IPv6 takilmasina karsi)
   bool _resolved = false;
   bool _probing = false;
+  bool _swTried = false;
   int _auto = 0;
   Timer? _autoTimer;
 
@@ -131,7 +132,8 @@ class _PlayerPageState extends State<PlayerPage> {
     }
     _urls = ordered;
     // Kimligin onemi yok (hepsi ayni cevabi veriyor): sadece VLC ve kimliksiz
-    _candidates = _build(const [0, 1], ipFirst: g?.$3 ?? false);
+    // Az deneme = az baglanti (tek baglantili hesaplarda sayac sismesin)
+    _candidates = _build(const [0], ipFirst: g?.$3 ?? false);
 
     _subs.addAll([
       _player.stream.playing.listen((p) {
@@ -200,8 +202,6 @@ class _PlayerPageState extends State<PlayerPage> {
           for (final x in _urls) (x, _uaList[order.first], true),
         for (final i in order)
           for (final x in _urls) (x, _uaList[i], false),
-        if (!ipFirst)
-          for (final x in _urls) (x, _uaList[order.first], true),
       ];
 
   // Tum kimlikleri ayni anda dener; ilk cevap veren kimligin sirasini doner
@@ -351,6 +351,19 @@ class _PlayerPageState extends State<PlayerPage> {
     // Yayin zaten oynuyorsa veya mesaj zararsiz bir uyariysa hata sayma
     if (_started) return;
     if (reason.contains('force-seekable')) return;
+    // "Could not open codec": donanim cozucu yayini acamadi -> yazilim
+    // cozucuyle ayni adresi bir kez daha dene
+    if (!_swTried && _logs.any((l) => l.toLowerCase().contains('codec'))) {
+      _swTried = true;
+      _logs.clear();
+      Future(() async {
+        try {
+          await (_player.platform as dynamic).setProperty('hwdec', 'no');
+        } catch (_) {}
+        if (mounted && !_started) _openCurrent();
+      });
+      return;
+    }
     if (_idx < _candidates.length - 1) {
       _idx++;
       _openCurrent();
@@ -421,7 +434,7 @@ class _PlayerPageState extends State<PlayerPage> {
         _uaResults.entries.map((e) => '${e.key}: ${e.value}').join('\n');
     final mpv = _logs.isEmpty
         ? ''
-        : '\noynatıcı: ${_logs.reversed.take(4).map(_mask).join(' | ')}';
+        : '\noynatıcı: ${_logs.reversed.take(6).map(_mask).join(' | ')}';
     final head = '${_mask(widget.url)}\n$table$mpv';
     setState(() => _probeInfo = '$head\nHesap kontrol ediliyor…');
 
