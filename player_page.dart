@@ -38,6 +38,9 @@ class _PlayerPageState extends State<PlayerPage> {
   String? _limitMsg;
   String? _ip; // alan adinin IPv4 adresi (IPv6 takilmasina karsi)
   bool _resolved = false;
+  bool _probing = false;
+  int _auto = 0;
+  Timer? _autoTimer;
 
   // Sunucu basina hangi yontem calisti (host:port -> sunucu, uzanti, IP ile mi)
   // Sonraki acilislarda dogrudan bunu dene, bos yere bekleme
@@ -390,7 +393,30 @@ class _PlayerPageState extends State<PlayerPage> {
     }
   }
 
+  void _retry() {
+    _autoTimer?.cancel();
+    _probing = false;
+    setState(() {
+      _error = null;
+      _probeInfo = null;
+      _limitMsg = null;
+      _idx = 0;
+    });
+    _openCurrent();
+  }
+
   Future<void> _runProbe() async {
+    if (_probing) return;
+    _probing = true;
+    // Once kendi baglantimizi kapat: sayac bizim denememizi "baska cihaz"
+    // sanmasin
+    try {
+      await _player.stop();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _probeInfo = 'Bağlantı kontrol ediliyor…');
+    await Future.delayed(const Duration(seconds: 3));
+    if (!mounted) return;
     final table =
         _uaResults.entries.map((e) => '${e.key}: ${e.value}').join('\n');
     final mpv = _logs.isEmpty
@@ -413,7 +439,45 @@ class _PlayerPageState extends State<PlayerPage> {
     final acc = await Future.wait(auths.map(_accountInfo));
     if (!mounted) return;
     final accText = acc.where((e) => e.isNotEmpty).join('\n');
-    setState(() => _probeInfo = '$head\n$accText');
+    final streamText = await _streamProbe();
+    if (!mounted) return;
+
+    // Sunucu meşgulse (limit ya da 503) birkaç kez otomatik yeniden dene
+    final busy = _limitMsg != null || streamText.contains('HTTP 503');
+    if (busy && _auto < 3) {
+      _limitMsg = '${_limitMsg ?? 'Sunucu şu an meşgul görünüyor (503).'}\n'
+          '25 sn sonra otomatik yeniden denenecek (${_auto + 1}/3).';
+      _autoTimer?.cancel();
+      _autoTimer = Timer(const Duration(seconds: 25), () {
+        if (mounted && _error != null) {
+          _auto++;
+          _retry();
+        }
+      });
+    }
+    setState(() => _probeInfo = '$head\n$accText\n$streamText');
+  }
+
+  // Yayin adresi ne cevap veriyor? Hata ise sunucunun yazdigi mesaji goster
+  Future<String> _streamProbe() async {
+    final c = http.Client();
+    try {
+      final req = http.Request('GET', Uri.parse(_urls.first))
+        ..headers['User-Agent'] = _uaList[0]!;
+      final r = await c.send(req).timeout(const Duration(seconds: 8));
+      if (r.statusCode < 400) return 'Yayın adresi: HTTP ${r.statusCode}';
+      final body = await r.stream.bytesToString().timeout(const Duration(seconds: 5));
+      final t = body
+          .replaceAll(RegExp(r'<[^>]*>'), ' ')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      return 'Yayın adresi: HTTP ${r.statusCode} · '
+          '${_mask(t.length > 120 ? t.substring(0, 120) : t)}';
+    } catch (e) {
+      return 'Yayın adresi: ${e is TimeoutException ? 'cevap yok' : 'hata'}';
+    } finally {
+      c.close();
+    }
   }
 
   // Canli yayin: adres ne donuyor, liste ise ilk parca hangi sunucuda
@@ -483,9 +547,9 @@ class _PlayerPageState extends State<PlayerPage> {
       final act = int.tryParse('${ui['active_cons']}');
       final mx = int.tryParse('${ui['max_connections']}');
       if (act != null && mx != null && mx > 0 && act >= mx) {
-        _limitMsg = 'Bu kod şu an başka bir cihazda ya da uygulamada açık '
-            'görünüyor (bağlantı $act/$mx). Diğerini kapat, 1-2 dakika bekle, '
-            'sonra "Tekrar dene"ye bas.';
+        _limitMsg = 'Sağlayıcı bu kodda bağlantı sayısını $act/$mx gösteriyor. '
+            'Başka yerde açık değilse bile kapanan bağlantı 1-2 dakika '
+            'sayılmaya devam edebilir.';
       }
       var exp = 'süresiz';
       final e = int.tryParse('${ui['exp_date']}');
@@ -712,6 +776,7 @@ class _PlayerPageState extends State<PlayerPage> {
 
   @override
   void dispose() {
+    _autoTimer?.cancel();
     _watchdog?.cancel();
     _hideTimer?.cancel();
     _hintTimer?.cancel();
@@ -963,13 +1028,8 @@ class _PlayerPageState extends State<PlayerPage> {
                 const SizedBox(height: 14),
                 OutlinedButton(
                   onPressed: () {
-                    setState(() {
-                      _error = null;
-                      _probeInfo = null;
-                      _limitMsg = null;
-                      _idx = 0;
-                    });
-                    _openCurrent();
+                    _auto = 0;
+                    _retry();
                   },
                   child: const Text('Tekrar dene'),
                 ),
