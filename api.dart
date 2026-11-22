@@ -229,3 +229,49 @@ class XtreamApi {
     return SeriesDetails(plot: plot, episodes: out);
   }
 }
+
+// ---------------------------------------------------------------- hesap bilgisi
+
+class AccountInfo {
+  final String status;
+  final DateTime? expires; // null = suresiz
+  final int? active;
+  final int? max;
+  const AccountInfo(this.status, this.expires, this.active, this.max);
+}
+
+/// Xtream hesabinin durumu, bitis tarihi ve baglanti sayisi.
+/// M3U listelerinde link icinde username/password varsa onu kullanir.
+Future<AccountInfo?> fetchAccount(Profile p) async {
+  try {
+    String base, user, pass;
+    if (p.xtream) {
+      final a = XtreamApi(p.server, p.user, p.pass);
+      base = a.base;
+      user = a.user;
+      pass = a.pass;
+    } else {
+      final u = Uri.parse(p.m3u.trim());
+      user = u.queryParameters['username'] ?? '';
+      pass = u.queryParameters['password'] ?? '';
+      if (user.isEmpty || u.host.isEmpty) return null;
+      base = '${u.scheme}://${u.host}${u.hasPort ? ':${u.port}' : ''}';
+    }
+    final uri = Uri.parse('$base/player_api.php')
+        .replace(queryParameters: {'username': user, 'password': pass});
+    final r = await http.get(uri).timeout(const Duration(seconds: 15));
+    if (r.statusCode != 200) return null;
+    final j = jsonDecode(utf8.decode(r.bodyBytes, allowMalformed: true));
+    final ui = j is Map ? j['user_info'] : null;
+    if (ui is! Map) return null;
+    final e = int.tryParse('${ui['exp_date']}');
+    return AccountInfo(
+      '${ui['status'] ?? ''}',
+      e == null ? null : DateTime.fromMillisecondsSinceEpoch(e * 1000),
+      int.tryParse('${ui['active_cons']}'),
+      int.tryParse('${ui['max_connections']}'),
+    );
+  } catch (_) {
+    return null;
+  }
+}

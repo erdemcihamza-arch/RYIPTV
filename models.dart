@@ -107,14 +107,22 @@ class Profile {
     this.pass = '',
   });
 
-  Profile copyWith({String? name}) => Profile(
+  Profile copyWith({
+    String? name,
+    bool? xtream,
+    String? m3u,
+    String? server,
+    String? user,
+    String? pass,
+  }) =>
+      Profile(
         id: id,
         name: name ?? this.name,
-        xtream: xtream,
-        m3u: m3u,
-        server: server,
-        user: user,
-        pass: pass,
+        xtream: xtream ?? this.xtream,
+        m3u: m3u ?? this.m3u,
+        server: server ?? this.server,
+        user: user ?? this.user,
+        pass: pass ?? this.pass,
       );
 
   Map<String, dynamic> toJson() => {

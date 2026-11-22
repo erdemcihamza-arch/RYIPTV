@@ -37,6 +37,20 @@ class _PlayerPageState extends State<PlayerPage> {
   final List<String> _logs = [];
   String? _limitMsg;
   String? _ip; // alan adinin IPv4 adresi (IPv6 takilmasina karsi)
+  bool _resolved = false;
+
+  // Sunucu basina hangi yontem calisti (host:port -> sunucu, uzanti, IP ile mi)
+  // Sonraki acilislarda dogrudan bunu dene, bos yere bekleme
+  static final Map<String, (String, String, bool)> _good = {};
+
+  String get _key {
+    try {
+      final p = Uri.parse(widget.url);
+      return '${p.host}:${p.port}';
+    } catch (_) {
+      return widget.url;
+    }
+  }
   late Tracks _tracks;
   int _idx = 0;
 
@@ -96,8 +110,25 @@ class _PlayerPageState extends State<PlayerPage> {
         if (_fixed(x) != null) _fixed(x)!,
       ...base,
     ];
-    _urls = urls;
-    _candidates = _build(const [0, 1, 2, 3]);
+    // Daha once calisan yontem varsa onu one al
+    final g = _good[_key];
+    var ordered = urls;
+    if (g != null) {
+      bool match(String x) {
+        try {
+          final p = Uri.parse(x);
+          return '${p.host}:${p.port}' == g.$1 &&
+              x.toLowerCase().endsWith('.${g.$2}');
+        } catch (_) {
+          return false;
+        }
+      }
+
+      ordered = [...urls.where(match), ...urls.where((x) => !match(x))];
+    }
+    _urls = ordered;
+    // Kimligin onemi yok (hepsi ayni cevabi veriyor): sadece VLC ve kimliksiz
+    _candidates = _build(const [0, 1], ipFirst: g?.$3 ?? false);
 
     _subs.addAll([
       _player.stream.playing.listen((p) {
@@ -158,11 +189,16 @@ class _PlayerPageState extends State<PlayerPage> {
     return u.length > 22 ? '${u.substring(0, 22)}…' : u;
   }
 
-  // Once IPv4 adresiyle (varsa), sonra normal adresle sirayla kimlikler
-  List<(String, String?, bool)> _build(List<int> order) => [
-        for (final x in _urls) (x, _uaList[order.first], true),
+  // Once normal adresle (hizli), IPv4 adresiyle deneme en sona kalir
+  List<(String, String?, bool)> _build(List<int> order,
+          {bool ipFirst = false}) =>
+      [
+        if (ipFirst)
+          for (final x in _urls) (x, _uaList[order.first], true),
         for (final i in order)
           for (final x in _urls) (x, _uaList[i], false),
+        if (!ipFirst)
+          for (final x in _urls) (x, _uaList[order.first], true),
       ];
 
   // Tum kimlikleri ayni anda dener; ilk cevap veren kimligin sirasini doner
@@ -219,6 +255,12 @@ class _PlayerPageState extends State<PlayerPage> {
   void _markStarted() {
     if (!mounted || _started) return;
     _watchdog?.cancel();
+    // Calisan yontemi hatirla
+    try {
+      final (wurl, _, viaIp) = _candidates[_idx];
+      final w = Uri.parse(wurl);
+      _good[_key] = ('${w.host}:${w.port}', wurl.split('.').last.toLowerCase(), viaIp);
+    } catch (_) {}
     setState(() {
       _started = true;
       _error = null;
@@ -233,6 +275,14 @@ class _PlayerPageState extends State<PlayerPage> {
       await p.setProperty('tls-verify', 'no');
       await p.setProperty('network-timeout', '15');
     } catch (_) {}
+    if (widget.isLive) {
+      // Canli yayinda format tespitini kisalt: daha hizli acilir
+      try {
+        final p = _player.platform as dynamic;
+        await p.setProperty('demuxer-lavf-analyzeduration', '2');
+        await p.setProperty('demuxer-lavf-probesize', '1000000');
+      } catch (_) {}
+    }
     if (widget.isLive && Store.lowLatency) {
       try {
         final p = _player.platform as dynamic;
@@ -241,7 +291,6 @@ class _PlayerPageState extends State<PlayerPage> {
         await p.setProperty('demuxer-readahead-secs', '2');
       } catch (_) {}
     }
-    await _resolveIp();
     // Not: kimlikleri ayni anda denemiyoruz; tek baglantili hesaplarda
     // fazladan baglanti yer kaplar
     if (!mounted) return;
@@ -265,6 +314,14 @@ class _PlayerPageState extends State<PlayerPage> {
     var (url, ua, viaIp) = _candidates[_idx];
     final headers = <String, String>{if (ua != null) 'User-Agent': ua};
     if (viaIp) {
+      if (_ip == null && !_resolved) {
+        // IPv4 adresini sadece gerekince coz (normal acilista beklemesin)
+        _resolved = true;
+        _resolveIp().then((_) {
+          if (mounted) _openCurrent();
+        });
+        return;
+      }
       if (_ip == null) {
         // IPv4 cozulemediyse bu varyanti atla
         if (_idx < _candidates.length - 1) {

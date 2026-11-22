@@ -1,7 +1,7 @@
 name: iptv_app
 description: Kisisel IPTV oynatici (M3U + Xtream)
 publish_to: "none"
-version: 2.6.0+7
+version: 2.8.0+9
 
 environment:
   sdk: ">=3.3.0 <4.0.0"

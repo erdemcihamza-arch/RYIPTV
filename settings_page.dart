@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'api.dart';
 import 'models.dart';
 import 'pin.dart';
 import 'store.dart';
@@ -23,6 +24,224 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
+  Future<AccountInfo?>? _acc;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAcc();
+  }
+
+  void _loadAcc() {
+    final p = Store.active;
+    _acc = p == null ? null : fetchAccount(p);
+  }
+
+  String _d(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}';
+
+  String _status(String s) {
+    switch (s.toLowerCase()) {
+      case 'active':
+        return 'Aktif';
+      case 'expired':
+        return 'Süresi dolmuş';
+      case 'disabled':
+        return 'Devre dışı';
+      case 'banned':
+        return 'Engellenmiş';
+      default:
+        return s.isEmpty ? '-' : s;
+    }
+  }
+
+  Widget _accountTile() {
+    return FutureBuilder<AccountInfo?>(
+      future: _acc,
+      builder: (ctx, s) {
+        if (s.connectionState != ConnectionState.done) {
+          return const ListTile(
+            leading: Icon(Icons.event_outlined),
+            title: Text('Abonelik bilgisi alınıyor…'),
+          );
+        }
+        final a = s.data;
+        if (a == null) {
+          return ListTile(
+            leading: const Icon(Icons.event_busy_outlined),
+            title: const Text('Bitiş tarihi alınamadı'),
+            subtitle: const Text(
+                'Sağlayıcı bilgi vermiyor ya da ulaşılamadı. Yenilemek için dokun.'),
+            onTap: () => setState(_loadAcc),
+          );
+        }
+        final exp = a.expires;
+        final now = DateTime.now();
+        final expired = exp != null && exp.isBefore(now);
+        final left = exp?.difference(now).inDays;
+        final warn = expired || (left != null && left <= 7);
+        final parts = <String>[
+          if (left != null) (expired ? 'Süresi dolmuş' : '$left gün kaldı'),
+          'Durum: ${_status(a.status)}',
+          if (a.active != null && a.max != null)
+            'Bağlantı: ${a.active}/${a.max}',
+        ];
+        return ListTile(
+          leading: Icon(
+            warn ? Icons.warning_amber_rounded : Icons.event_available_outlined,
+            color: warn ? Colors.amber : null,
+          ),
+          title: Text(exp == null
+              ? 'Bitiş tarihi: süresiz'
+              : 'Bitiş tarihi: ${_d(exp)}'),
+          subtitle: Text(parts.join(' · ')),
+          trailing: const Icon(Icons.refresh),
+          onTap: () => setState(_loadAcc),
+        );
+      },
+    );
+  }
+
+  Future<void> _edit(Profile p) async {
+    final name = TextEditingController(text: p.name);
+    final m3u = TextEditingController(text: p.m3u);
+    final server = TextEditingController(text: p.server);
+    final user = TextEditingController(text: p.user);
+    final pass = TextEditingController(text: p.pass);
+    var xtream = p.xtream;
+    var hide = true;
+    String? err;
+    final np = await showDialog<Profile>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: const Text('Listeyi düzenle'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: false, label: Text('M3U linki')),
+                  ButtonSegment(value: true, label: Text('Xtream')),
+                ],
+                selected: {xtream},
+                onSelectionChanged: (s) => setD(() => xtream = s.first),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: name,
+                decoration: const InputDecoration(labelText: 'Liste adı'),
+              ),
+              const SizedBox(height: 12),
+              if (!xtream)
+                TextField(
+                  controller: m3u,
+                  keyboardType: TextInputType.url,
+                  decoration: const InputDecoration(labelText: 'M3U linki'),
+                )
+              else ...[
+                TextField(
+                  controller: server,
+                  keyboardType: TextInputType.url,
+                  decoration: const InputDecoration(
+                    labelText: 'Sunucu adresi',
+                    hintText: 'http://sunucu.com:8080',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: user,
+                  decoration: const InputDecoration(labelText: 'Kullanıcı adı'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: pass,
+                  obscureText: hide,
+                  decoration: InputDecoration(
+                    labelText: 'Şifre',
+                    suffixIcon: IconButton(
+                      icon: Icon(hide ? Icons.visibility : Icons.visibility_off),
+                      onPressed: () => setD(() => hide = !hide),
+                    ),
+                  ),
+                ),
+              ],
+              if (err != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(err!,
+                      style: TextStyle(color: Theme.of(ctx).colorScheme.error)),
+                ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Vazgeç')),
+            FilledButton(
+              onPressed: () {
+                final bad = xtream
+                    ? (server.text.trim().isEmpty ||
+                        user.text.trim().isEmpty ||
+                        pass.text.trim().isEmpty)
+                    : m3u.text.trim().isEmpty;
+                if (bad) {
+                  setD(() => err = 'Boş alan bırakma');
+                  return;
+                }
+                Navigator.pop(
+                  ctx,
+                  p.copyWith(
+                    name: name.text.trim().isEmpty ? p.name : name.text.trim(),
+                    xtream: xtream,
+                    m3u: m3u.text.trim(),
+                    server: server.text.trim(),
+                    user: user.text.trim(),
+                    pass: pass.text.trim(),
+                  ),
+                );
+              },
+              child: const Text('Kaydet'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (np == null || !mounted) return;
+
+    // Xtream bilgileri dogru mu? Dogrulanamazsa kullaniciya sor
+    if (np.xtream) {
+      _snack('Bilgiler kontrol ediliyor…');
+      final a = await fetchAccount(np);
+      if (!mounted) return;
+      if (a == null) {
+        final keep = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Bilgiler doğrulanamadı'),
+            content: const Text(
+                'Sunucuya ulaşılamadı ya da kullanıcı adı / şifre hatalı olabilir. Yine de kaydedilsin mi?'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Vazgeç')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Kaydet')),
+            ],
+          ),
+        );
+        if (keep != true) return;
+      }
+    }
+    await Store.updateProfile(np);
+    if (!mounted) return;
+    if (np.id == Store.activeId) {
+      widget.onSwitch(np); // aktif liste: yeni bilgilerle yeniden yukle
+    } else {
+      setState(() {});
+    }
+  }
+
   void _snack(String t) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t)));
 
@@ -136,12 +355,13 @@ class _SettingsPageState extends State<SettingsPage> {
               overflow: TextOverflow.ellipsis,
             ),
             trailing: IconButton(
-              tooltip: 'Adı değiştir',
+              tooltip: 'Düzenle',
               icon: const Icon(Icons.edit_outlined),
-              onPressed: () => _rename(p),
+              onPressed: () => _edit(p),
             ),
             onTap: p.id == Store.activeId ? null : () => widget.onSwitch(p),
           ),
+        _accountTile(),
         ListTile(
           leading: const Icon(Icons.add_circle_outline),
           title: const Text('Yeni liste ekle'),

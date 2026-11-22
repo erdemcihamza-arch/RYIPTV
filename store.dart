@@ -136,6 +136,11 @@ class Store {
     await _saveProfiles();
   }
 
+  static Future<void> updateProfile(Profile np) async {
+    profiles = [for (final p in profiles) p.id == np.id ? np : p];
+    await _saveProfiles();
+  }
+
   static Future<void> removeProfile(String id) async {
     profiles.removeWhere((p) => p.id == id);
     await prefs.remove('favs_$id');
